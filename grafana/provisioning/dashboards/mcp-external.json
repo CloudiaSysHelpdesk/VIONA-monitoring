@@ -1,0 +1,193 @@
+{
+  "title": "MCP (externe) — Dashboard",
+  "uid": "mcp-external-pro",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "timezone": "",
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.4.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "2.9.0" },
+    { "type": "panel", "id": "row", "name": "Row", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "bargauge", "name": "Bar gauge", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" }
+  ],
+  "panels": [
+    { "type": "row", "title": "Vue d'ensemble", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+
+    {
+      "type": "stat",
+      "title": "Exporter UP",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(up{job=\"mcp-external\"})" } ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "MCP UP (self-health)",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(mcp_up) OR on() vector(0)" } ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "UNHEALTHY", "color": "red" }, "1": { "text": "HEALTHY", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Uptime (h)",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "(time() - max(process_start_time_seconds{job=\"mcp-external\"})) / 3600" } ],
+      "fieldConfig": { "defaults": { "unit": "hours", "decimals": 1 } }
+    },
+    {
+      "type": "stat",
+      "title": "CPU % (proc MCP)",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(mcp_cpu_percent) OR on() vector(0)" } ],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1 } }
+    },
+    {
+      "type": "stat",
+      "title": "Mémoire RSS (Mio)",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(mcp_memory_bytes)/1024/1024 OR on() vector(0)" } ],
+      "fieldConfig": { "defaults": { "unit": "decbytes", "decimals": 0 } }
+    },
+    {
+      "type": "stat",
+      "title": "Health RPS",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "rate(mcp_health_latency_seconds_count[$__rate_interval]) OR on() vector(0)" } ],
+      "fieldConfig": { "defaults": { "unit": "ops", "decimals": 2 } }
+    },
+
+    { "type": "row", "title": "Santé & latences", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 } },
+
+    {
+      "type": "timeseries",
+      "title": "Latence health — p50/p95/p99 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "refId": "A", "legendFormat": "p50", "expr": "histogram_quantile(0.50, sum by (le) (rate(mcp_health_latency_seconds_bucket[$__rate_interval]))) OR on() vector(0)" },
+        { "refId": "B", "legendFormat": "p95", "expr": "histogram_quantile(0.95, sum by (le) (rate(mcp_health_latency_seconds_bucket[$__rate_interval]))) OR on() vector(0)" },
+        { "refId": "C", "legendFormat": "p99", "expr": "histogram_quantile(0.99, sum by (le) (rate(mcp_health_latency_seconds_bucket[$__rate_interval]))) OR on() vector(0)" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Health RPS & CPU proc (%)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "targets": [
+        { "refId": "A", "legendFormat": "health rps", "expr": "rate(mcp_health_latency_seconds_count[$__rate_interval]) OR on() vector(0)" },
+        { "refId": "B", "legendFormat": "cpu % (proc)", "expr": "mcp_cpu_percent OR on() vector(0)" }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Répartition latences (15m)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (le) (increase(mcp_health_latency_seconds_bucket[15m])) OR on() vector(0)" }
+      ],
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "options": { "displayMode": "lcd", "orientation": "horizontal" }
+    },
+
+    { "type": "row", "title": "Processus & Python runtime", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 } },
+
+    {
+      "type": "timeseries",
+      "title": "Mémoire (RSS) & VMem (bytes)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "legendFormat": "RSS", "expr": "mcp_memory_bytes OR on() vector(0)" },
+        { "refId": "B", "legendFormat": "VMem", "expr": "process_virtual_memory_bytes{job=\"mcp-external\"} OR on() vector(0)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "table",
+      "title": "Python / Process info",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "python_info{job=\"mcp-external\"}", "format": "table" },
+        { "refId": "B", "expr": "process_open_fds{job=\"mcp-external\"}", "format": "table" },
+        { "refId": "C", "expr": "process_cpu_seconds_total{job=\"mcp-external\"}", "format": "table" }
+      ],
+      "options": { "showHeader": true }
+    },
+
+    { "type": "row", "title": "Ressources conteneur (cAdvisor)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 } },
+
+    {
+      "type": "timeseries",
+      "title": "CPU % (service mcp-external)",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service=\"mcp-server-enhanced-external\"}[$__rate_interval])) * 100 OR on() vector(0)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Mémoire (Working Set)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_service=\"mcp-server-enhanced-external\"}) OR on() vector(0)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Réseau Rx/Tx (B/s)",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (container_label_com_docker_compose_service) (rate(container_network_receive_bytes_total{container_label_com_docker_compose_service=\"mcp-server-enhanced-external\"}[$__rate_interval])) OR on() vector(0)"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (container_label_com_docker_compose_service) (rate(container_network_transmit_bytes_total{container_label_com_docker_compose_service=\"mcp-server-enhanced-external\"}[$__rate_interval])) OR on() vector(0)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } }
+    }
+  ]
+}
+

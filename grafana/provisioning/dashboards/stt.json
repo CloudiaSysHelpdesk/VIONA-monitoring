@@ -1,0 +1,218 @@
+{
+  "title": "STT Dashboard",
+  "uid": "stt-pro",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "timezone": "",
+  "templating": {
+    "list": [
+      {
+        "name": "gpu",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "Prometheus" },
+        "refresh": 1,
+        "query": "label_values(DCGM_FI_DEV_GPU_UTIL, gpu)",
+        "includeAll": false,
+        "multi": false,
+        "current": { "selected": true, "text": "3", "value": "3" }
+      }
+    ]
+  },
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.4.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "2.9.0" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "bargauge", "name": "Bar gauge", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "row", "name": "Row", "version": "" },
+    { "type": "panel", "id": "gauge", "name": "Gauge", "version": "" }
+  ],
+  "panels": [
+    { "type": "row", "title": "Vue d'ensemble", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+
+    {
+      "type": "stat",
+      "title": "STT UP",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(up{job=\"stt\"})" } ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Uptime (h)",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "(time() - max(container_start_time_seconds{container_label_com_docker_compose_service=\"stt\"})) / 3600" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "hours", "decimals": 1 } }
+    },
+    {
+      "type": "stat",
+      "title": "QPS total",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "sum(rate(stt_requests_total[5m])) OR on() vector(0)" } ],
+      "fieldConfig": { "defaults": { "unit": "req/s", "decimals": 2 } }
+    },
+    {
+      "type": "stat",
+      "title": "Erreur %",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "100 * (sum(rate(stt_requests_total{status=~\"4..|5..\"}[5m])) / sum(rate(stt_requests_total[5m]))) OR on() vector(0)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2 } }
+    },
+    {
+      "type": "stat",
+      "title": "Latence p95 /transcribe (s)",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(stt_request_latency_seconds_bucket{path=\"/transcribe\"}[5m]))) OR on() vector(0)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } }
+    },
+
+    { "type": "row", "title": "Requêtes & Latences", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 } },
+
+    {
+      "type": "timeseries",
+      "title": "RPS par endpoint",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (path) (rate(stt_requests_total[5m]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "req/s", "min": 0 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latence p50/p95/p99 (tous endpoints)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "legendFormat": "p50", "expr": "histogram_quantile(0.50, sum by (le) (rate(stt_request_latency_seconds_bucket[5m])))" },
+        { "refId": "B", "legendFormat": "p95", "expr": "histogram_quantile(0.95, sum by (le) (rate(stt_request_latency_seconds_bucket[5m])))" },
+        { "refId": "C", "legendFormat": "p99", "expr": "histogram_quantile(0.99, sum by (le) (rate(stt_request_latency_seconds_bucket[5m])))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "table",
+      "title": "Erreurs 4xx/5xx par endpoint (15m)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (path,status) (increase(stt_requests_total{status=~\"4..|5..\"}[15m]))" }
+      ],
+      "options": { "showHeader": true }
+    },
+
+    { "type": "row", "title": "Audio & Transcription", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 } },
+
+    {
+      "type": "timeseries",
+      "title": "Débit audio ingéré (bytes/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(stt_audio_bytes_sum[5m]) OR on() vector(0)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Débit mots transcrits (mots/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "rate(stt_transcript_words_sum[5m]) OR on() vector(0)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+
+    { "type": "row", "title": "GPU / Device", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 } },
+
+    {
+      "type": "gauge",
+      "title": "Device utilisé (0=CPU, 1=GPU)",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "stt_gpu_device_in_use" } ],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1, "unit": "none" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU Utilization (%) — GPU $gpu",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "avg by (gpu) (DCGM_FI_DEV_GPU_UTIL{gpu=~\"$gpu\"})" } ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "VRAM utilisée (MiB) — GPU $gpu",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "avg by (gpu) (DCGM_FI_DEV_FB_USED{gpu=~\"$gpu\"})" } ],
+      "fieldConfig": { "defaults": { "unit": "mibytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Power (W) — GPU $gpu",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "refId": "A", "expr": "avg by (gpu) (DCGM_FI_DEV_POWER_USAGE{gpu=~\"$gpu\"})" } ],
+      "fieldConfig": { "defaults": { "unit": "watt" } }
+    },
+
+    { "type": "row", "title": "Ressources conteneur STT (cAdvisor)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 } },
+
+    {
+      "type": "timeseries",
+      "title": "CPU % (service stt)",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 41 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service=\"stt\"}[5m])) * 100" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Mémoire (Working Set)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 41 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (container_label_com_docker_compose_service) (container_memory_working_set_bytes{container_label_com_docker_compose_service=\"stt\"})" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Réseau Rx/Tx (B/s)",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 41 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (container_label_com_docker_compose_service) (rate(container_network_receive_bytes_total{container_label_com_docker_compose_service=\"stt\"}[5m]))" },
+        { "refId": "B", "expr": "sum by (container_label_com_docker_compose_service) (rate(container_network_transmit_bytes_total{container_label_com_docker_compose_service=\"stt\"}[5m]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } }
+    }
+  ]
+}
+

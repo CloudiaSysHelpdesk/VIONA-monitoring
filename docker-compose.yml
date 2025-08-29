@@ -1,0 +1,107 @@
+version: "3.8"
+
+networks:
+  ai-net:
+    external: true
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    networks:
+      - monitoring
+      - ai-net
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/conf/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    pid: host
+    networks: [monitoring]
+    ports:
+      - "9100:9100"
+    command:
+      - --path.rootfs=/
+
+  dcgm-exporter:
+    image: nvidia/dcgm-exporter:latest
+    container_name: dcgm-exporter
+    restart: unless-stopped
+    runtime: nvidia
+    networks: [monitoring]
+    ports:
+      - "9400:9400"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    restart: unless-stopped
+    networks: [monitoring]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+    ports:
+      - "3002:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+  # ===== Alertmanager (enverra vers le bridge) =====
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    networks: [monitoring]
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+
+  # ===== Bridge Prometheus -> Microsoft Teams =====
+  msteams-bridge:
+    image: bzon/prometheus-msteams:latest
+    container_name: msteams-bridge
+    restart: unless-stopped
+    networks: [monitoring]
+    environment:
+      # ⚠️ Remplace par TON webhook Teams complet
+      TEAMS_WEBHOOK_URL: "https://cloudiasys.webhook.office.com/webhookb2/45a26bd1-b76c-47c3-af72-770442a20be7@3f99d2af-56d2-4481-9acf-698917ce971e/IncomingWebhook/990a6d8999ec441cb01db5b925f095f5/3f3577b2-4e96-4b01-a655-902ac105b9d3/V2x5Rfdh3eaJjJUe6mm_Qzc4MYEYAuPYgUCUD4D1IjEhc1"
+    # Pas besoin d'exposer de port : Alertmanager l'appelle via le réseau "monitoring"
+

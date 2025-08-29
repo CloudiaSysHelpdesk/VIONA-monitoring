@@ -1,0 +1,16 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: ms-teams
+  group_by: [alertname, job, instance]
+  group_wait: 10s
+  group_interval: 2m
+  repeat_interval: 4h
+
+receivers:
+- name: ms-teams
+  msteams_configs:
+  - webhook_url: "https://cloudiasys.webhook.office.com/webhookb2/45a26bd1-b76c-47c3-af72-770442a20be7@3f99d2af-56d2-4481-9acf-698917ce971e/IncomingWebhook/990a6d8999ec441cb01db5b925f095f5/3f3577b2-4e96-4b01-a655-902ac105b9d3/V2x5Rfdh3eaJjJUe6mm_Qzc4MYEYAuPYgUCUD4D1IjEhc1"
+    send_resolved: true
+

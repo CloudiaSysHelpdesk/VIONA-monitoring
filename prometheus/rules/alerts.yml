@@ -1,0 +1,295 @@
+groups:
+
+# =========================
+# DISPONIBILITÉ / SCRAPES
+# =========================
+- name: availability
+  rules:
+  - alert: InstanceDown
+    expr: up == 0
+    for: 2m
+    labels: {severity: critical}
+    annotations:
+      summary: "Target down: {{ $labels.job }} ({{ $labels.instance }})"
+      description: "Le scrape {{ $labels.job }} sur {{ $labels.instance }} ne répond plus depuis >2m."
+
+  - alert: PrometheusRuleEvalFailures
+    expr: increase(prometheus_rule_evaluation_failures_total[5m]) > 0
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "Échecs d'évaluation de règles"
+      description: "Prometheus rencontre des échecs d'évaluation de règles ({{ $value }} sur 5m). Vérifier les règles ou la charge."
+
+# =========================
+# HÔTE (node-exporter)
+# =========================
+- name: host
+  rules:
+  - alert: HostHighCPU
+    expr: 100 - avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 > 80
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "CPU hôte élevé ({{ $labels.instance }})"
+      description: "Utilisation CPU >80% (moyenne 5m) depuis >10m."
+
+  - alert: HostHighCPUCritical
+    expr: 100 - avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 > 90
+    for: 10m
+    labels: {severity: critical}
+    annotations:
+      summary: "CPU hôte très élevé ({{ $labels.instance }})"
+      description: "Utilisation CPU >90% (moyenne 5m) depuis >10m."
+
+  - alert: HostMemoryPressure
+    expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "Mémoire hôte élevée ({{ $labels.instance }})"
+      description: "Mémoire utilisée >85% depuis >15m."
+
+  - alert: HostMemoryCritical
+    expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 95
+    for: 10m
+    labels: {severity: critical}
+    annotations:
+      summary: "Mémoire hôte critique ({{ $labels.instance }})"
+      description: "Mémoire utilisée >95% depuis >10m."
+
+  - alert: HostDiskSpaceLow
+    expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|devtmpfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs"}) * 100 > 85
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "Espace disque faible ({{ $labels.instance }} {{ $labels.mountpoint }})"
+      description: "Partition >85% utilisée depuis >15m."
+
+  - alert: HostDiskSpaceCritical
+    expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|devtmpfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs"}) * 100 > 95
+    for: 10m
+    labels: {severity: critical}
+    annotations:
+      summary: "Espace disque critique ({{ $labels.instance }} {{ $labels.mountpoint }})"
+      description: "Partition >95% utilisée depuis >10m."
+
+  - alert: HostDiskInodesLow
+    expr: (1 - node_filesystem_files_free{fstype!~"tmpfs|devtmpfs"} / node_filesystem_files{fstype!~"tmpfs|devtmpfs"}) * 100 > 85
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "Inodes faibles ({{ $labels.instance }} {{ $labels.mountpoint }})"
+      description: "Inodes utilisés >85% depuis >15m."
+
+# =========================
+# DOCKER / CONTAINERS (cAdvisor)
+# =========================
+- name: docker
+  rules:
+  - alert: ContainerMissing
+    expr: time() - max_over_time(container_last_seen{name!=""}[5m]) > 300
+    for: 2m
+    labels: {severity: critical}
+    annotations:
+      summary: "Conteneur manquant: {{ $labels.name }}"
+      description: "Le conteneur {{ $labels.name }} ne publie plus de métriques cAdvisor depuis >5m."
+
+  # CPU générique (exclut llm/tts)
+  - alert: ContainerHighCPU
+    expr: 100 * rate(container_cpu_usage_seconds_total{name!="",name!~"llm|moshi-tts"}[5m]) > 80
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "CPU élevé: {{ $labels.name }}"
+      description: "CPU >80% d’un core (5m) pour {{ $labels.name }} depuis >10m."
+
+  - alert: ContainerHighCPUCritical
+    expr: 100 * rate(container_cpu_usage_seconds_total{name!="",name!~"llm|moshi-tts"}[5m]) > 90
+    for: 10m
+    labels: {severity: critical}
+    annotations:
+      summary: "CPU très élevé: {{ $labels.name }}"
+      description: "CPU >90% d’un core (5m) pour {{ $labels.name }} depuis >10m."
+
+  # Mémoire générique avec limites (exclut llm/tts)
+  - alert: ContainerHighMemory
+    expr: |
+      (container_spec_memory_limit_bytes{name!="",name!~"llm|moshi-tts"} > 0)
+      and on(name)
+      (container_memory_working_set_bytes{name!="",name!~"llm|moshi-tts"} / container_spec_memory_limit_bytes{name!="",name!~"llm|moshi-tts"} * 100 > 85)
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "Mémoire élevée: {{ $labels.name }}"
+      description: "Working set >85% de la limite mémoire depuis >15m."
+
+  - alert: ContainerHighMemoryCritical
+    expr: |
+      (container_spec_memory_limit_bytes{name!="",name!~"llm|moshi-tts"} > 0)
+      and on(name)
+      (container_memory_working_set_bytes{name!="",name!~"llm|moshi-tts"} / container_spec_memory_limit_bytes{name!="",name!~"llm|moshi-tts"} * 100 > 95)
+    for: 10m
+    labels: {severity: critical}
+    annotations:
+      summary: "Mémoire critique: {{ $labels.name }}"
+      description: "Working set >95% de la limite mémoire depuis >10m."
+
+  # Mémoire générique sans limite (exclut llm/tts)
+  - alert: ContainerHighMemoryNoLimit
+    expr: |
+      (container_spec_memory_limit_bytes{name!="",name!~"llm|moshi-tts"} == 0)
+      and on(name)
+      (container_memory_working_set_bytes{name!="",name!~"llm|moshi-tts"} > 4 * 1024 * 1024 * 1024)
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "Mémoire élevée (sans limite): {{ $labels.name }}"
+      description: "Working set >4GiB sans limite mémoire déclarée (à ajuster)."
+
+  - alert: ContainerRestartRate
+    expr: changes(container_start_time_seconds{name!=""}[15m]) > 0
+    for: 1m
+    labels: {severity: warning}
+    annotations:
+      summary: "Redémarrage détecté: {{ $labels.name }}"
+      description: "Le conteneur {{ $labels.name }} a redémarré au cours des 15 dernières minutes."
+
+  - alert: ContainerOOMKilled
+    expr: increase(container_oom_events_total{name!=""}[15m]) > 0
+    for: 1m
+    labels: {severity: critical}
+    annotations:
+      summary: "OOM Kill: {{ $labels.name }}"
+      description: "Des événements OOM ont été observés pour {{ $labels.name }} (sur 15m)."
+
+  # --- RÈGLES SPÉCIFIQUES LLM/TTS ---
+  # CPU en coeurs équivalents
+  - alert: LLMHighCPUcores
+    expr: rate(container_cpu_usage_seconds_total{name="llm"}[5m]) > 8
+    for: 10m
+    labels: {severity: warning, service: llm}
+    annotations:
+      summary: "LLM consomme >8 vCPU"
+      description: "Le conteneur llm utilise >8 vCPU (moyenne 5m) depuis >10m."
+
+  - alert: LLMHighCPUcoresCritical
+    expr: rate(container_cpu_usage_seconds_total{name="llm"}[5m]) > 16
+    for: 10m
+    labels: {severity: critical, service: llm}
+    annotations:
+      summary: "LLM consomme >16 vCPU"
+      description: "Le conteneur llm utilise >16 vCPU (moyenne 5m) depuis >10m."
+
+  - alert: TTSHighCPUcores
+    expr: rate(container_cpu_usage_seconds_total{name="moshi-tts"}[5m]) > 4
+    for: 10m
+    labels: {severity: warning, service: tts}
+    annotations:
+      summary: "TTS consomme >4 vCPU"
+      description: "Le conteneur moshi-tts utilise >4 vCPU (moyenne 5m) depuis >10m."
+
+  - alert: TTSHighCPUcoresCritical
+    expr: rate(container_cpu_usage_seconds_total{name="moshi-tts"}[5m]) > 8
+    for: 10m
+    labels: {severity: critical, service: tts}
+    annotations:
+      summary: "TTS consomme >8 vCPU"
+      description: "Le conteneur moshi-tts utilise >8 vCPU (moyenne 5m) depuis >10m."
+
+  # RAM absolue
+  - alert: LLMHighMemory
+    expr: container_memory_working_set_bytes{name="llm"} > 50 * 1024 * 1024 * 1024
+    for: 15m
+    labels: {severity: warning, service: llm}
+    annotations:
+      summary: "LLM RAM élevée (>50GiB)"
+      description: "Le conteneur llm dépasse 50 GiB de RAM depuis >15m."
+
+  - alert: LLMHighMemoryCritical
+    expr: container_memory_working_set_bytes{name="llm"} > 120 * 1024 * 1024 * 1024
+    for: 10m
+    labels: {severity: critical, service: llm}
+    annotations:
+      summary: "LLM RAM très élevée (>120GiB)"
+      description: "Le conteneur llm dépasse 120 GiB de RAM depuis >10m."
+
+  - alert: TTSHighMemory
+    expr: container_memory_working_set_bytes{name="moshi-tts"} > 12 * 1024 * 1024 * 1024
+    for: 15m
+    labels: {severity: warning, service: tts}
+    annotations:
+      summary: "TTS RAM élevée (>12GiB)"
+      description: "Le conteneur moshi-tts dépasse 12 GiB de RAM depuis >15m."
+
+  - alert: TTSHighMemoryCritical
+    expr: container_memory_working_set_bytes{name="moshi-tts"} > 24 * 1024 * 1024 * 1024
+    for: 10m
+    labels: {severity: critical, service: tts}
+    annotations:
+      summary: "TTS RAM très élevée (>24GiB)"
+      description: "Le conteneur moshi-tts dépasse 24 GiB de RAM depuis >10m."
+
+# =========================
+# GPU (dcgm-exporter)
+# =========================
+- name: gpu
+  rules:
+  - alert: GPUHighUtilization
+    expr: DCGM_FI_DEV_GPU_UTIL > 95
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "Utilisation GPU élevée ({{ $labels.UUID }} / {{ $labels.instance }})"
+      description: "GPU util >95% depuis >15m."
+
+  - alert: GPUHighMemory
+    expr: (DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL) * 100 > 90
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "Mémoire GPU élevée ({{ $labels.UUID }} / {{ $labels.instance }})"
+      description: "VRAM >90% depuis >15m."
+
+  - alert: GPUTemperatureHigh
+    expr: DCGM_FI_DEV_GPU_TEMP > 85
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "Température GPU élevée ({{ $labels.UUID }} / {{ $labels.instance }})"
+      description: "Température >85°C depuis >10m."
+
+  - alert: GPUErrors
+    expr: increase(DCGM_FI_DEV_XID_ERRORS[30m]) > 0 or increase(DCGM_FI_DEV_ECC_DBE_AGG_TOTAL[30m]) > 0
+    for: 1m
+    labels: {severity: critical}
+    annotations:
+      summary: "Erreurs GPU ({{ $labels.UUID }} / {{ $labels.instance }})"
+      description: "Erreurs XID/ECC observées sur 30m."
+
+# =========================
+# APPS DE LA STACK
+# =========================
+- name: apps
+  rules:
+  - alert: ServiceDown
+    expr: up{job=~"vllm|stt|tts|qdrant|mcp-internal|mcp-external|grafana"} == 0
+    for: 2m
+    labels: {severity: critical}
+    annotations:
+      summary: "Service down: {{ $labels.job }} ({{ $labels.instance }})"
+      description: "Le job {{ $labels.job }} ne répond plus depuis >2m."
+
+# =========================
+# SELF-MONITORING
+# =========================
+- name: self
+  rules:
+  - alert: PromTargetScrapeSlow
+    expr: increase(prometheus_target_scrape_pool_exceeded_target_limit_total[10m]) > 0
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "Scrapes lents ou limités"
+      description: "Prometheus a rencontré des scrapes lents/limités (pool exceeded) sur 10m."
+
