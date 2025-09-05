@@ -1,139 +1,243 @@
-# Monitoring Stack avec Prometheus, Grafana et Exporters
+# Monitoring des services Docker avec Prometheus & Grafana
 
-Ce projet fournit une stack de monitoring complète basée sur **Docker
-Compose**, incluant :
+> **Portée :** Hôte(s) Docker, conteneurs applicatifs (vLLM, STT, TTS, Qdrant, MCP), GPU NVIDIA, et chaîne d’alerting vers Microsoft Teams
 
--   **Prometheus** : collecte des métriques\
--   **Node Exporter** : métriques système (CPU, RAM, disque, réseau)\
--   **DCGM Exporter** : métriques GPU NVIDIA\
--   **cAdvisor** : métriques des conteneurs Docker\
--   **Grafana** : visualisation et dashboards\
--   **Alertmanager** : gestion des alertes Prometheus\
--   **Prometheus Teams Bridge** : envoi d'alertes vers Microsoft Teams
+---
 
-------------------------------------------------------------------------
+## 1) Résumé exécutif
 
-## 🚀 Prérequis
+- **Objectif :** fournir une observabilité de bout en bout (infrastructure → conteneurs → applications) avec tableaux de bord et alertes en temps réel.
+- **Bénéfices clés :**
+  - Diagnostic rapide des incidents (CPU/RAM disque, GPU, latences app).
+  - Visibilité de la santé des services critiques (vLLM, STT, TTS, Qdrant, MCP).
+  - Alertes vers Teams pour réponse opérationnelle coordonnée.
+- **Technologies :** Prometheus, Grafana, cAdvisor, Node Exporter, NVIDIA DCGM Exporter, Alertmanager + bridge Teams.
 
--   Docker & Docker Compose installés\
--   Un réseau Docker externe `ai-net` existant :
+---
 
-``` bash
-docker network create ai-net
+## 2) Architecture & flux
+
+```
+[Node Exporter]      [cAdvisor]          [DCGM Exporter]       [Apps (vLLM/STT/TTS/Qdrant/MCP)]
+      |                   |                       |                        | (endpoint /metrics)
+      +-------------------+-----------------------+------------------------+
+                                      ↓ (scrapes)
+                                [Prometheus]
+                                     |  
+                                     | (datasource)
+                                  [Grafana]
+                                     |  
+                                     | (alerts)
+                                [Alertmanager]──►[Bridge Prometheus→Teams]──►[Canal Teams]
 ```
 
--   (Optionnel) Un webhook Microsoft Teams pour recevoir les alertes.
+- **Réseaux Docker :** `monitoring` (interne) + rattachement à `ai-net` pour Prometheus.
+- **Persistance :** volumes `prometheus-data` et `grafana-data`.
+- **Séparation des rôles :**
+  - *Collecte* (exporters, /metrics applicatifs)
+  - *Ingestion/stockage court terme* (Prometheus, retention 15j)
+  - *Visualisation* (Grafana, dashboards provisionnés)
+  - *Alerte* (Alertmanager → Teams via bridge)
 
-------------------------------------------------------------------------
+---
 
-## 📂 Structure du projet
+## 3) Déploiement (Docker Compose)
 
-    .
-    ├── docker-compose.yml
-    ├── prometheus/
-    │   ├── conf/prometheus.yml
-    │   └── rules/...
-    ├── grafana/
-    │   └── provisioning/...
-    └── alertmanager/
-        └── alertmanager.yml
+**Fichier :** `docker-compose.yml` (version 3.8)
 
-------------------------------------------------------------------------
+### 3.1 Services déployés
 
-## ▶️ Lancer la stack
+- **Prometheus** (`prom/prometheus:latest`)
+  - Ports : `9090:9090`
+  - Volumes : `./prometheus/conf/prometheus.yml` (ro), `./prometheus/rules` (ro), `prometheus-data:/prometheus`
+  - Options : `--storage.tsdb.retention.time=15d`, `--web.enable-lifecycle`
+  - Réseaux : `monitoring`, `ai-net`.
+- **Node Exporter** (`prom/node-exporter:latest`)
+  - Expose `:9100`, accès PID host, `--path.rootfs=/`.
+- **cAdvisor** (`gcr.io/cadvisor/cadvisor:v0.49.1`)
+  - Monte `rootfs`, `var/run`, `sys`, `var/lib/docker` en lecture seule.
+- **DCGM Exporter** (`nvidia/dcgm-exporter:latest`)
+  - Expose `:9400`, `runtime: nvidia`.
+- **Grafana** (`grafana/grafana:latest`)
+  - Ports : `3002:3000`
+  - Provisioning : `./grafana/provisioning:/etc/grafana/provisioning` (ro)
+  - Variables env : admin/password, thème dark, anonymat désactivé.
+- **Alertmanager** (`prom/alertmanager:latest`)
+  - Ports : `9093:9093`
+  - Config : `./alertmanager/alertmanager.yml` (ro).
+- **Bridge Teams** (`bzon/prometheus-msteams:latest`)
+  - **⚠ Secret webhook** injecté via `TEAMS_WEBHOOK_URL`. **À stocker en secret/.env, pas en clair.**
 
-``` bash
-docker-compose up -d
+> **Commande d’orchestration**\
+> `docker compose up -d`\
+> **Arrêt** : `docker compose down` (ajouter `-v` *uniquement* si vous souhaitez supprimer les volumes de données).
+
+---
+
+## 4) Configuration Prometheus
+
+**Fichier :** `prometheus/conf/prometheus.yml`
+
+- **Global** : `scrape_interval: 15s`, `evaluation_interval: 15s`.
+- **Alerting** : cible `alertmanager:9093`.
+- **Jobs configurés :**
+  - `prometheus` (self-scrape), `node-exporter`, `cadvisor`, `dcgm`
+  - **Applications** : `stt`, `tts`, `qdrant`, `vllm`, `mcp-internal`, `mcp-external` (tous exposent `/metrics`)
+- **Règles** : chargées depuis `rule_files: /etc/prometheus/rules/*.yml`.
+
+> **Bonnes pratiques :**
+>
+> - S’assurer que tous les endpoints `/metrics` retournent **200** rapidement (<1s) et ne nécessitent pas d’auth sur le réseau `monitoring`.
+
+---
+
+## 5) Règles d’alerte (PromQL)
+
+**Fichier :** `prometheus/rules/alerts.yml`
+
+### 5.1 Disponibilité & self-monitoring
+
+- **InstanceDown** (target `up==0` >2m)
+- Échecs d’évaluation de règles
+- Scrapes lents / pool exceeded
+
+### 5.2 Hôte (Node Exporter)
+
+- CPU >80/90% (10m), Mémoire >85/95%, Disque plein >85/95%, Inodes faibles >85%
+
+### 5.3 Conteneurs (cAdvisor)
+
+- Conteneur manquant (last seen >5m), redémarrages, OOMKill
+- CPU/mémoire élevées (avec versions spécifiques **LLM/TTS** : vCPU, RAM absolue)
+- Mémoire sans limite >4GiB (alerte dédiée)
+
+### 5.4 GPU (DCGM)
+
+- Utilisation >95% (15m), VRAM >90% (15m), Temp >85°C (10m), erreurs XID/ECC (critique)
+
+### 5.5 Apps de la stack
+
+- `up{job=~"vllm|stt|tts|qdrant|mcp-.*|grafana"}==0` (2m)
+
+> **Seuils** à ajuster selon charge nominale. Prévoir **routes de silence** (maintenance) côté Alertmanager.
+
+---
+
+## 6) Alertmanager → Microsoft Teams
+
+**Fichier :** `alertmanager/alertmanager.yml`
+
+- **Routing** : groupement par `alertname, job, instance`, `group_wait:10s`, `group_interval:2m`, `repeat_interval:4h`.
+- **Receiver** : `msteams_configs` (bridge `prometheus-msteams`).
+
+> **Sécurité / Secret management**
+>
+> - **Ne jamais** committer le **webhook Teams** en clair. Utiliser `.env` + `env_file:` ou un secret Docker/Swarm.
+> - Exemple :
+>
+> ```yaml
+> services:
+>   msteams-bridge:
+>     environment:
+>       TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL}
+>     env_file: .env  # contient TEAMS_WEBHOOK_URL=...
+> ```
+
+---
+
+## 7) Grafana : provisioning & dashboards
+
+**Provisioning** : `grafana/provisioning` (provider `provider.yml`, chemin `options.path: /etc/grafana/provisioning/dashboards`).
+
+**Dashboards inclus (JSON) :**
+
+- **vLLM** (`vllm.json`) : disponibilité, TTFT/E2E (p50/p95/p99), throughput (tokens/s), cache, GPU (utilisation/VRAM/puissance), ressources conteneur.
+- **TTS** (`tts.json`) : up, canaux/connexions, steps/s, p95 step, sessions, GPU, ressources conteneur.
+- **STT** (`stt.json`) : QPS, erreurs %, latences globales + `/transcribe`, débit audio/mots, GPU, ressources conteneur.
+- **Qdrant** (`qdrant.json`) : up/uptime, RPS par méthode/endpoint, latences p50/p95/p99, erreurs 4xx/5xx, CPU/RAM/I/O/Network du conteneur.
+- **MCP interne/externe** (`mcp-*.json`) : health p50/p95/p99, RPS, CPU%, RSS, métriques Python/process, ressources conteneur.
+
+> **Datasource Prometheus** : vérifier UID/nom `Prometheus` dans les JSON et la datasource provisionnée.\
+> **Autorisations** : compte admin initial `admin/admin` → **à changer immédiatement**.\
+> **Accès** : http\://\<hôte>:3002/ (port mappé 3002→3000).
+
+---
+
+## 8) Procédures opérationnelles
+
+### 8.1 Démarrage / arrêt / reload
+
+```bash
+# (Depuis le dossier du compose)
+docker compose up -d
+# Recharger Prometheus (sans restart)
+curl -X POST http://localhost:9090/-/reload
+# Arrêt (sans supprimer volumes)
+docker compose down
 ```
 
-Vérifie que tous les conteneurs tournent :
+### 8.2 Ajouter un nouveau service à monitorer
 
-``` bash
-docker ps
+1. Exposer `/metrics` sur le conteneur (librairie client ou exporter dédié).
+2. Ajouter un `job_name` dans `prometheus.yml` avec `targets: ["<service>:<port>"]`.
+3. (Optionnel) Créer des panels Grafana et/ou règles d’alerte spécifiques.
+4. `curl -X POST http://prometheus:9090/-/reload` (ou redeployer Prometheus).
+
+### 8.3 Sauvegardes & rétention
+
+- **Grafana** : volume `grafana-data` (dashboards, users, datasources).
+- **Prometheus** : volume `prometheus-data` (TSDB, 15j). Export/backup périodique recommandé si obligations d’audit.
+
+### 8.4 Mise à jour sécurisée
+
+- Mettre à jour par tag **mineur** plutôt que `latest` en production.
+- Valider sur un environnement de test (compatibilité dashboards/règles).
+- Surveiller changelogs (Prometheus/Grafana/DCGM/cAdvisor).
+
+---
+
+## 9) Sécurité & conformité
+
+- **Secrets** : webhook Teams, mots de passe Grafana → `.env`/secrets, jamais en clair dans GIT.
+- **Réseaux** : `monitoring` isolé ; exposer UI (`9090`, `3002`, `9093`) via règles de firewall.
+- **Comptes** : changer `GF_SECURITY_ADMIN_PASSWORD`; créer des **org/users** avec RBAC.
+
+---
+
+## 10) Indicateurs clés (KPI) proposés
+
+- **Infra** : CPU, mémoire, disque, inodes par hôte ; disponibilité des targets.
+- **Conteneurs** : CPU %, working set, redémarrages, OOM, réseau.
+- **GPU** : utilisation %, VRAM, puissance, température, erreurs XID/ECC.
+- **Apps** : latences p50/p95/p99, RPS, taux d’erreur, throughput spécifique (tokens/s vLLM, audio/mots STT, RPS Qdrant).
+- **SLO** (exemples) : E2E p95 vLLM < *X*s ; erreurs 5xx < *Y*%; disponibilité service > *99.9%*.
+
+---
+
+## 11) Troubleshooting (FAQ rapide)
+
+- **Alerte InstanceDown** : vérifier DNS/réseau du target, `docker inspect <service>`, logs de l’exporter.
+- **Panels vides** : datasource Prometheus non configurée ou mauvais UID ; vérifier intervalle de temps et labels.
+- **DCGM Exporter** : nécessite drivers NVIDIA + runtime ; vérifier `nvidia-smi` dans l’hôte et `--gpus`.
+- **cAdvisor** : permissions de montages en RO, version compatible Docker (`v0.49.1` OK).
+- **Teams non reçu** : vérifier `TEAMS_WEBHOOK_URL` (secret), logs bridge `prometheus-msteams`, et routing Alertmanager.
+
+---
+
+## 12) Annexes
+
+- **Extraits utiles**
+
+```yaml
+# Retention Prometheus
+--storage.tsdb.retention.time=15d
+
+# Job vLLM (exemple)
+- job_name: "vllm"
+  metrics_path: /metrics
+  static_configs:
+    - targets: ["llm:8000"]
 ```
 
-------------------------------------------------------------------------
+- **Fichiers source** : `docker-compose.yml`, `prometheus.yml`, `prometheus/rules/alerts.yml`, `alertmanager.yml`, `grafana/provisioning/provider.yml`, dashboards JSON (vLLM, STT, TTS, Qdrant, MCP).
 
-## 🔗 Accès aux services
-
-  -----------------------------------------------------------------------
-  Service                         Port local         Description
-  ------------------------------- ------------------ --------------------
-  Prometheus                      `9090`             Interface Prometheus
-
-  Node Exporter                   `9100`             Métriques système
-
-  DCGM Exporter                   `9400`             Métriques GPU NVIDIA
-
-  cAdvisor                        `8080`             Monitoring des
-                                                     conteneurs
-
-  Grafana                         `3002`             Dashboards
-                                                     (user/pass:
-                                                     `admin/admin`)
-
-  Alertmanager                    `9093`             Interface
-                                                     Alertmanager
-
-  Teams Bridge                    `-`                Forward des alertes
-                                                     vers Teams
-  -----------------------------------------------------------------------
-
-------------------------------------------------------------------------
-
-## ⚙️ Configuration
-
-### Prometheus
-
--   Fichier de configuration : `./prometheus/conf/prometheus.yml`\
--   Règles d'alerte : `./prometheus/rules/`
-
-### Grafana
-
--   Données persistées dans `grafana-data`\
--   Dashboards et datasources configurés dans `./grafana/provisioning`
-
-### Alertmanager
-
--   Config : `./alertmanager/alertmanager.yml`\
--   Supporte les routes et les receveurs (Teams, email, etc.)
-
-### Microsoft Teams Bridge
-
--   Variable d'environnement :
-
-``` yaml
-TEAMS_WEBHOOK_URL: "https://ton.webhook.office.com/..."
-```
-
-⚠️ Remplace l'URL par ton vrai webhook Teams.
-
-------------------------------------------------------------------------
-
-## 🛑 Arrêter la stack
-
-``` bash
-docker-compose down
-```
-
-Si tu veux tout supprimer (y compris les volumes persistés) :
-
-``` bash
-docker-compose down -v
-```
-
-------------------------------------------------------------------------
-
-## 📊 Exemple de dashboards Grafana
-
--   Node Exporter Full\
--   cAdvisor Container Monitoring\
--   NVIDIA DCGM Metrics
-
-------------------------------------------------------------------------
-
-## 📌 TODO
-
--   Ajouter des dashboards Grafana personnalisés\
--   Sécuriser Grafana avec un vrai mot de passe\
--   Ajouter des receivers supplémentaires dans Alertmanager
