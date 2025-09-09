@@ -1,23 +1,33 @@
 #!/bin/bash
-# Azure VM Backup (safe & idempotent)
-# - Creates/updates Vault + policy
-# - Skips enable if VM already protected in target vault
-# - Runs backup-now ONLY when protection is enabled in this run
+# Azure VM Backup (safe & idempotent) - LRS enforced + Policy V1 (Daily)
+# - Crée/valide le Vault (LRS)
+# - Policy: Daily @ 23:00 UTC, retention 14j
+# - Active la protection si nécessaire
+# - backup-now uniquement au premier enable
+
 set -euo pipefail
 
+# ----------- VARIABLES À ADAPTER -----------
 RG="rg-viona"
 LOC="northeurope"
-VAULT="rsv-viona-dev"
+VAULT="rsv-viona-dev"   # Doit être / rester en LRS
 POLICY="daily-14d"
 VM="viona-mvp-gpu"
 
-# Daily schedule (UTC)
-SCHEDULE_UTC="23:00:00"
+# Planning Daily (UTC)
+SCHEDULE_UTC="23:00:00"                 # HH:MM:SS
 TODAY_UTC="$(date -u +%Y-%m-%d)"
+DT="${TODAY_UTC}T${SCHEDULE_UTC}+00:00" # ISO complet avec offset +00:00
 RETENTION_DAYS=14
 
-# Manual backup retain-until (CLI expects DD-MM-YYYY)
+# Manual backup retain-until (CLI attend DD-MM-YYYY)
 RETAIN_UNTIL="01-10-2025"
+# -------------------------------------------
+
+cleanup() {
+  rm -f policy.default.json policy.final.json >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "[✘] '$1' required."; exit 1; } }
 
@@ -36,41 +46,106 @@ fi
 echo "[*] Ensure Resource Group..."
 az group show -n "$RG" >/dev/null 2>&1 || az group create -n "$RG" -l "$LOC" >/dev/null
 
+# ---------- helpers ----------
+get_prop() {
+  # $1 = JMESPath (ex: "[?name=='vaultstorageconfig'].properties.storageType | [0]")
+  az backup vault backup-properties show -g "$RG" -n "$VAULT" \
+    --query "$1" -o tsv 2>/dev/null || true
+}
+ensure_lrs_or_fail() {
+  local stype sstate
+  stype="$(get_prop "[?name=='vaultstorageconfig'].properties.storageType | [0]")"
+  sstate="$(get_prop "[?name=='vaultstorageconfig'].properties.storageTypeState | [0]")"
+
+  if [[ "$stype" == "LocallyRedundant" ]]; then
+    echo "[✔] Vault '$VAULT' already LRS."
+    return 0
+  fi
+
+  if [[ "$sstate" == "Locked" && "$stype" != "LocallyRedundant" ]]; then
+    echo "[✘] Vault '$VAULT' storage is '$stype' and LOCKED. Can't switch to LRS."
+    echo "Create a NEW vault in LRS and migrate protection."
+    exit 1
+  fi
+
+  echo "[*] Setting storage redundancy to LRS..."
+  az backup vault update -g "$RG" -n "$VAULT" \
+    --backup-storage-redundancy LocallyRedundant >/dev/null
+
+  stype="$(get_prop "[?name=='vaultstorageconfig'].properties.storageType | [0]")"
+  if [[ "$stype" != "LocallyRedundant" ]]; then
+    echo "[✘] Failed to set LRS (current: ${stype:-unknown})."
+    exit 1
+  fi
+  echo "[✔] Vault '$VAULT' set to LRS."
+}
+# -----------------------------
+
 echo "[*] Ensure Recovery Services Vault..."
 if ! az backup vault show -g "$RG" -n "$VAULT" >/dev/null 2>&1; then
   az backup vault create -g "$RG" -n "$VAULT" -l "$LOC" >/dev/null
-  echo "    Vault created: $VAULT"
+  echo "  Vault created: $VAULT"
 else
-  echo "    Vault exists: $VAULT"
+  echo "  Vault exists: $VAULT"
 fi
 
 echo "[*] Vault properties (enable soft-delete)..."
 az backup vault backup-properties set -g "$RG" -n "$VAULT" \
   --soft-delete-feature-state Enable >/dev/null || true
 
-echo "[*] Get default VM policy schema..."
+echo "[*] Enforce LRS on vault..."
+ensure_lrs_or_fail
+
+# ===================== POLICY (Daily @ SCHEDULE_UTC, retention RETENTION_DAYS) =====================
+echo "[*] Create/Update policy '${POLICY}' (daily @ $SCHEDULE_UTC UTC, retention ${RETENTION_DAYS}d)..."
+
+# Supprime l’ancienne policy si elle existe (évite des restes de structure incompatibles)
+if az backup policy show -g "$RG" -v "$VAULT" -n "$POLICY" >/dev/null 2>&1; then
+  echo "    Policy exists, deleting old version..."
+  az backup policy delete -g "$RG" -v "$VAULT" -n "$POLICY" --yes
+fi
+
+# Récupère une policy par défaut VM (forme attendue par l’API)
 az backup policy get-default-for-vm -g "$RG" -v "$VAULT" > policy.default.json
 
 echo "[*] Apply schedule ($SCHEDULE_UTC UTC) & retention ($RETENTION_DAYS days)..."
 jq \
-  --arg dt  "${TODAY_UTC}T${SCHEDULE_UTC}Z" \
-  --argjson d "${RETENTION_DAYS}" '
-  .properties.schedulePolicy.scheduleRunTimes = [$dt]
-  | ( .properties.retentionPolicy.dailySchedule.retentionDuration.count? // empty ) as $x
-    | if $x != null then
-        .properties.retentionPolicy.dailySchedule.retentionDuration.count = $d
-      else
-        ( .properties.retentionPolicy.retentionDuration.count? // empty ) as $y
-        | if $y != null then
-            .properties.retentionPolicy.retentionDuration.count = $d
-          else
-            .
-          end
-      end
+  --arg dt "$DT" \
+  --argjson d "$RETENTION_DAYS" '
+  # Normalise la zone et la fréquence
+  .properties.timeZone = "UTC"
+  | .properties.schedulePolicy.scheduleRunFrequency = "Daily"
+  # Horaire d’exécution (liste d’ISO datetimes)
+  | .properties.schedulePolicy.scheduleRunTimes = [$dt]
+  # Retention Daily (si le bloc existe dans la policy par défaut)
+  | if .properties.retentionPolicy.dailySchedule? then
+      .properties.retentionPolicy.dailySchedule.retentionTimes = [$dt]
+      | .properties.retentionPolicy.dailySchedule.retentionDuration.count = $d
+      | .properties.retentionPolicy.dailySchedule.retentionDuration.durationType = "Days"
+    else . end
+  # Certaines shapes mettent retentionDuration au niveau racine du retentionPolicy
+  | if .properties.retentionPolicy.retentionDuration?.count? then
+      .properties.retentionPolicy.retentionDuration.count = $d
+      | .properties.retentionPolicy.retentionDuration.durationType = "Days"
+    else . end
+  # Si un weeklySchedule est présent par défaut, on lui met au moins la retentionTimes (même heure)
+  | if .properties.retentionPolicy.weeklySchedule? then
+      .properties.retentionPolicy.weeklySchedule.retentionTimes = [$dt]
+    else . end
   ' policy.default.json > policy.final.json
+
+# Petit contrôle visuel utile en cas de debug (décommente si besoin)
+# jq '.properties.schedulePolicy.scheduleRunTimes,
+#     .properties.retentionPolicy.dailySchedule?.retentionTimes,
+#     .properties.retentionPolicy.dailySchedule?.retentionDuration,
+#     .properties.retentionPolicy.retentionDuration? // "no-flat-retentionDuration",
+#     .properties.timeZone' policy.final.json
 
 echo "[*] Create/Update policy '$POLICY'..."
 az backup policy set -g "$RG" -v "$VAULT" -n "$POLICY" --policy @policy.final.json >/dev/null
+
+echo "[✔] Policy '${POLICY}' created successfully."
+# ==============================================================================
 
 # ---------- protection checks ----------
 echo "[*] Check if VM is already protected in target vault..."
@@ -85,13 +160,19 @@ if [[ -n "${ITEM_ID_TARGET:-}" ]]; then
 else
   echo "[*] Not protected in target vault. Checking other vaults..."
   FOUND_OTHER_ID=""
+
+  # Liste de tous les vaults et inspection de la VM
   while IFS= read -r VAULT_ID; do
     [[ -z "$VAULT_ID" ]] && continue
-    OTHER_RG="$(echo "$VAULT_ID"   | awk -F/ '{for(i=1;i<=NF;i++) if($i=="resourceGroups"){print $(i+1)}}')"
-    OTHER_VAULT="$(echo "$VAULT_ID"| awk -F/ '{print $NF}')"
+    # (évite tout caractère NBSP parasite)
+    VAULT_ID_CLEAN="$(printf "%s" "$VAULT_ID" | tr -d "\u00A0")"
+    OTHER_RG="$(echo "$VAULT_ID_CLEAN"   | awk -F/ '{for(i=1;i<=NF;i++) if($i=="resourceGroups"){print $(i+1)}}')"
+    OTHER_VAULT="$(echo "$VAULT_ID_CLEAN"| awk -F/ '{print $NF}')"
+
     MATCH_ID="$(az backup item list -g "$OTHER_RG" -v "$OTHER_VAULT" \
       --backup-management-type AzureIaasVM \
       --query "[?contains(properties.friendlyName, '$VM')].id" -o tsv || true)"
+
     if [[ -n "$MATCH_ID" ]]; then
       FOUND_OTHER_ID="$MATCH_ID"
       FOUND_OTHER_VAULT="$OTHER_VAULT"
@@ -110,12 +191,10 @@ else
   az backup protection enable-for-vm --vault-name "$VAULT" -g "$RG" \
     --vm "$VM" --policy-name "$POLICY" >/dev/null
 
-  # Refresh item ID after enabling
   ITEM_ID_TARGET="$(az backup item list -g "$RG" -v "$VAULT" \
     --backup-management-type AzureIaasVM \
     --query "[?contains(properties.friendlyName, '$VM')].id" -o tsv)"
 
-  # Only trigger backup-now on first enable
   RUN_BACKUP_NOW="yes"
 fi
 # --------------------------------------
@@ -141,7 +220,7 @@ echo "[*] Jobs in last 24h:"
 az backup job list -g "$RG" -v "$VAULT" \
   --operation Backup \
   --start-date "$START_DATE" \
-  --end-date   "$END_DATE" \
+  --end-date "$END_DATE" \
   --query "[].{name:name,operation:properties.operation,status:properties.status,entity:properties.entityFriendlyName,start:properties.startTime,end:properties.endTime}" \
   -o table || true
 
