@@ -1,0 +1,78 @@
+groups:
+- name: whisper.rules
+  rules:
+  # --- Disponibilité & trafic ---
+  - alert: WhisperDown
+    expr: up{job="whisper"} == 0
+    for: 2m
+    labels: {severity: critical}
+    annotations:
+      summary: "Whisper ne répond plus"
+      description: "Le target Prometheus pour job=whisper est DOWN depuis 2m."
+
+  - alert: WhisperNoTraffic
+    expr: sum by (job) (rate(whisper_requests_total{job="whisper"}[15m])) == 0
+    for: 30m
+    labels: {severity: warning}
+    annotations:
+      summary: "Aucun trafic sur Whisper"
+      description: "Aucune requête observée sur 30 min (peut indiquer une panne côté client)."
+
+  # --- Qualité de service ---
+  - alert: WhisperHighErrorRate
+    expr: |
+      (sum by (job) (increase(whisper_requests_total{job="whisper",status!="200"}[5m])))
+      /
+      clamp_min(sum by (job) (increase(whisper_requests_total{job="whisper"}[5m])), 1)
+      > 0.05
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "Taux d'erreurs élevé (>5% sur 10m)"
+      description: "job={{ $labels.job }} — Erreur/Total > 5% sur 10 minutes."
+
+  - alert: WhisperP95Slow
+    expr: |
+      histogram_quantile(
+        0.95,
+        sum by (le, job) (rate(whisper_request_duration_seconds_bucket{job="whisper"}[5m]))
+      ) > 5
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "P95 latence > 5s (10m)"
+      description: "Le P95 de whisper_request_duration_seconds dépasse 5s."
+
+  - alert: WhisperQueueGrowing
+    expr: avg_over_time(whisper_queue_length{job="whisper"}[10m]) > 5
+    for: 10m
+    labels: {severity: info}
+    annotations:
+      summary: "File d'attente moyenne > 5"
+      description: "La file d'attente augmente depuis 10 min (risque de saturation)."
+
+  # --- GPU (DCGM exporter déjà en place) ---
+  - alert: GPUHighMemory
+    expr: max by (gpu) (DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL) > 0.9
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "GPU mémoire > 90%"
+      description: "gpu={{ $labels.gpu }} — Utilisation mémoire > 90%."
+
+  - alert: GPUBusyHigh
+    expr: max by (gpu) (DCGM_FI_DEV_GPU_UTIL) > 95
+    for: 10m
+    labels: {severity: info}
+    annotations:
+      summary: "GPU très occupé (>95%)"
+      description: "gpu={{ $labels.gpu }} — Utilisation GPU > 95% pendant 10 min."
+
+  - alert: GPUHot
+    expr: max by (gpu) (DCGM_FI_DEV_GPU_TEMP) > 85
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "GPU chaud (>85°C)"
+      description: "gpu={{ $labels.gpu }} — Température GPU élevée."
+

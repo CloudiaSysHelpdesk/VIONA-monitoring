@@ -1,0 +1,519 @@
+{
+  "title": "Viona — Overview & GPU-aware",
+  "tags": ["viona", "prod", "gpu", "observability"],
+  "style": "dark",
+  "timezone": "",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 38,
+  "version": 4,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "row",
+      "title": "Row 1 — Santé & SLO",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Status par job (up)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "min_over_time(up{job=~\"$job\"}[5m])",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "text": {}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 }
+    },
+    {
+      "type": "stat",
+      "title": "STT — Latence p95 (s) (hors /metrics|/health)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stt_request_latency_seconds_bucket{path!~\"/(metrics|health)\"}[5m])))",
+          "legendFormat": "STT p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 1.2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 }
+    },
+    {
+      "type": "stat",
+      "title": "Whisper — Latence p95 (s)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(whisper_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "Whisper p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1.2 },
+              { "color": "red", "value": 1.5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 }
+    },
+    {
+      "type": "stat",
+      "title": "TTS — Health p95 (s)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tts_health_latency_seconds_bucket[5m])))",
+          "legendFormat": "TTS health p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.2 },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 }
+    },
+    {
+      "type": "row",
+      "title": "Row 2 — RPS & Qdrant",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "RPS par service",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        { "expr": "sum(rate(stt_requests_total{path!~\"/(metrics|health)\"}[1m]))", "legendFormat": "STT RPS", "refId": "A" },
+        { "expr": "sum(rate(whisper_requests_total[1m]))", "legendFormat": "Whisper RPS", "refId": "B" },
+        { "expr": "sum by (endpoint) (rate(rest_responses_total[1m]))", "legendFormat": "Qdrant {{endpoint}}", "refId": "C" },
+        { "expr": "sum(rate(vllm:generation_tokens_total[1m]))", "legendFormat": "vLLM tokens/s", "refId": "D" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 8 },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "type": "table",
+      "title": "Qdrant — p95 par endpoint (s)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": { "excludeByName": {} } }
+      ],
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(rest_responses_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 3 },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 8 }
+    },
+    {
+      "type": "row",
+      "title": "Row 3 — GPU (groupes liés aux services)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "TTS (GPU0) — Utilisation GPU %",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [{ "expr": "avg(DCGM_FI_DEV_GPU_UTIL{gpu=\"0\"})", "legendFormat": "GPU0 util", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 17 }
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM (GPU1-2) — Utilisation GPU %",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [{ "expr": "avg(DCGM_FI_DEV_GPU_UTIL{gpu=~\"1|2\"})", "legendFormat": "GPU1-2 util", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 17 }
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU3 — Utilisation par service (%)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "avg by (pidns) (whisper_gpu_utilization_percent{gpu=\"3\"})",
+          "legendFormat": "Whisper {{pidns}}",
+          "refId": "A"
+        },
+        {
+          "expr": "avg by (pidns) (stt_gpu_utilization_percent{gpu=\"3\"})",
+          "legendFormat": "STT {{pidns}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 17 }
+    },
+    {
+      "type": "timeseries",
+      "title": "TTS (GPU0) — Mémoire GPU %",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "100 * DCGM_FI_DEV_FB_USED{gpu=\"0\"} / (DCGM_FI_DEV_FB_USED{gpu=\"0\"} + DCGM_FI_DEV_FB_FREE{gpu=\"0\"})",
+          "legendFormat": "GPU0 mem%",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 23 }
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM (GPU1-2) — Mémoire GPU %",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "avg(100 * DCGM_FI_DEV_FB_USED{gpu=~\"1|2\"} / (DCGM_FI_DEV_FB_USED{gpu=~\"1|2\"} + DCGM_FI_DEV_FB_FREE{gpu=~\"1|2\"}))",
+          "legendFormat": "GPU1-2 mem%",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 23 }
+    },
+    {
+      "type": "timeseries",
+      "title": "STT+Whisper (GPU3) — Mémoire GPU %",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "100 * DCGM_FI_DEV_FB_USED{gpu=\"3\"} / (DCGM_FI_DEV_FB_USED{gpu=\"3\"} + DCGM_FI_DEV_FB_FREE{gpu=\"3\"})",
+          "legendFormat": "GPU3 mem%",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 23 }
+    },
+    {
+      "type": "stat",
+      "title": "vLLM — KV-Cache usage (%)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [{ "expr": "max(vllm:gpu_cache_usage_perc) * 100", "legendFormat": "KV-cache %", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green" },
+              { "color": "orange", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false, "fields": "" } },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 29 }
+    },
+    {
+      "type": "timeseries",
+      "title": "STT (GPU3) — Mémoire GPU % (proc)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        { "expr": "100 * stt_gpu_memory_used_bytes / stt_gpu_memory_total_bytes", "legendFormat": "STT %", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "gridPos": { "h": 6, "w": 9, "x": 6, "y": 29 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Whisper (GPU3) — Mémoire GPU % (proc)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "100 * sum by (gpu) (whisper_gpu_memory_used_bytes{gpu=\"3\"}) / on(gpu) whisper_gpu_memory_total_bytes{gpu=\"3\"}",
+          "legendFormat": "Whisper %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "gridPos": { "h": 6, "w": 9, "x": 15, "y": 29 }
+    },
+    {
+      "type": "row",
+      "title": "Row 4 — VM (node-exporter)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU VM %",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\",instance=~\"$instance\"}[5m])))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 36 }
+    },
+    {
+      "type": "timeseries",
+      "title": "RAM Used %",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes{instance=~\"$instance\"} / node_memory_MemTotal_bytes{instance=~\"$instance\"}))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 36 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Disk Space Used % (/)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "100 * (1 - (node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\",mountpoint=\"/\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\",mountpoint=\"/\"}))",
+          "legendFormat": "root",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 36 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Disk IO latency approx (ms/op)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "1000 * ( rate(node_disk_io_time_seconds_total{device!~\"loop.*\"}[5m]) / ( rate(node_disk_reads_completed_total{device!~\"loop.*\"}[5m]) + rate(node_disk_writes_completed_total{device!~\"loop.*\"}[5m]) ) )",
+          "legendFormat": "{{device}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 42 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Network In/Out (bytes/s)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(node_network_receive_bytes_total{device!~\"lo\",instance=~\"$instance\"}[5m]))",
+          "legendFormat": "IN {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (instance) (rate(node_network_transmit_bytes_total{device!~\"lo\",instance=~\"$instance\"}[5m]))",
+          "legendFormat": "OUT {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 42 }
+    },
+    {
+      "type": "row",
+      "title": "Row 5 — Containers (cAdvisor)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "bargauge",
+      "title": "CPU % — Conteneurs clés",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "100 * sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"llm|moshi-stt|moshi-tts|whisper|qdrant_production\"}[5m]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 49 }
+    },
+    {
+      "type": "bargauge",
+      "title": "RAM (MiB) — Conteneurs clés",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "sum by (name) (container_memory_working_set_bytes{name=~\"llm|moshi-stt|moshi-tts|whisper|qdrant_production\"}) / 1024^2",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "MiB" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 49 }
+    },
+    {
+      "type": "table",
+      "title": "Restarts récents (1h)",
+      "datasource": { "type": "prometheus", "uid": "$datasource" },
+      "targets": [
+        {
+          "expr": "sum by (name) (changes(container_start_time_seconds{name=~\".+\"}[1h]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 55 }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Prometheus",
+        "hide": 0
+      },
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "query": "label_values(up, job)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "label": "job",
+        "hide": 0
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "query": "label_values(up{job=~\"$job\"}, instance)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "label": "instance",
+        "hide": 0
+      },
+      {
+        "name": "endpoint",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "query": "label_values(rest_responses_duration_seconds, endpoint)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "label": "Qdrant endpoint",
+        "hide": 0
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "15s", "30s", "1m", "2m", "5m"],
+    "time_options": ["15m", "1h", "6h", "12h", "24h", "7d", "30d"]
+  },
+  "annotations": {
+    "list": [
+      {
+        "name": "Alertmanager",
+        "type": "alertmanager",
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "enable": true,
+        "hide": false
+      }
+    ]
+  }
+}
+

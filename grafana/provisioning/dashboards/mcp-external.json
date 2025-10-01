@@ -24,7 +24,7 @@
       "title": "Exporter UP",
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "targets": [ { "refId": "A", "expr": "max(up{job=\"mcp-external\"})" } ],
+      "targets": [ { "refId": "A", "expr": "max(up{job=\"mcp-teacher\"})" } ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
@@ -52,7 +52,7 @@
       "title": "Uptime (h)",
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "targets": [ { "refId": "A", "expr": "(time() - max(process_start_time_seconds{job=\"mcp-external\"})) / 3600" } ],
+      "targets": [ { "refId": "A", "expr": "(time() - max(process_start_time_seconds{job=\"mcp-teacher\"})) / 3600" } ],
       "fieldConfig": { "defaults": { "unit": "hours", "decimals": 1 } }
     },
     {
@@ -126,7 +126,7 @@
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "targets": [
         { "refId": "A", "legendFormat": "RSS", "expr": "mcp_memory_bytes OR on() vector(0)" },
-        { "refId": "B", "legendFormat": "VMem", "expr": "process_virtual_memory_bytes{job=\"mcp-external\"} OR on() vector(0)" }
+        { "refId": "B", "legendFormat": "VMem", "expr": "process_virtual_memory_bytes{job=\"mcp-teacher\"} OR on() vector(0)" }
       ],
       "fieldConfig": { "defaults": { "unit": "bytes" } }
     },
@@ -136,9 +136,9 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "targets": [
-        { "refId": "A", "expr": "python_info{job=\"mcp-external\"}", "format": "table" },
-        { "refId": "B", "expr": "process_open_fds{job=\"mcp-external\"}", "format": "table" },
-        { "refId": "C", "expr": "process_cpu_seconds_total{job=\"mcp-external\"}", "format": "table" }
+        { "refId": "A", "expr": "python_info{job=\"mcp-teacher\"}", "format": "table" },
+        { "refId": "B", "expr": "process_open_fds{job=\"mcp-teacher\"}", "format": "table" },
+        { "refId": "C", "expr": "process_cpu_seconds_total{job=\"mcp-teacher\"}", "format": "table" }
       ],
       "options": { "showHeader": true }
     },

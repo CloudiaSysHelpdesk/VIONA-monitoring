@@ -273,7 +273,7 @@ groups:
 - name: apps
   rules:
   - alert: ServiceDown
-    expr: up{job=~"vllm|stt|tts|qdrant|mcp-internal|mcp-external|grafana"} == 0
+    expr: up{job=~"vllm|stt|tts|qdrant|viona-mcp-teacher-server|viona-mcp-internal-server|grafana"} == 0
     for: 2m
     labels: {severity: critical}
     annotations:

@@ -1,0 +1,223 @@
+{
+  "id": null,
+  "uid": "whisper-main-v21",
+  "title": "Whisper Dashboard",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "5s",
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Datasource",
+        "current": {}
+      },
+      {
+        "name": "job",
+        "type": "query",
+        "label": "Job",
+        "datasource": "$datasource",
+        "query": "label_values(up, job)",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {"text": "whisper", "value": "whisper", "selected": true}
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "label": "Instance",
+        "datasource": "$datasource",
+        "query": "label_values(up{job=\"$job\"}, instance)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {"text": "All", "value": ".*", "selected": true},
+        "regex": ""
+      },
+      {
+        "name": "model",
+        "type": "query",
+        "label": "Model",
+        "datasource": "$datasource",
+        "query": "label_values(whisper_audio_seconds_total{job=\"$job\"}, model)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {"text": "All", "value": ".*", "selected": true}
+      },
+      {
+        "name": "language",
+        "type": "query",
+        "label": "Language",
+        "datasource": "$datasource",
+        "query": "label_values(whisper_audio_seconds_total{job=\"$job\"}, language)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {"text": "All", "value": ".*", "selected": true}
+      },
+      {
+        "name": "proto",
+        "type": "query",
+        "label": "Protocol",
+        "datasource": "$datasource",
+        "query": "label_values(whisper_requests_total{job=\"$job\"}, proto)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {"text": "All", "value": ".*", "selected": true}
+      },
+      {
+        "name": "gpu",
+        "type": "query",
+        "label": "GPU",
+        "datasource": "$datasource",
+        "query": "label_values(DCGM_FI_DEV_GPU_UTIL, gpu)",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {"text": "3", "value": "3", "selected": true}
+      }
+    ]
+  },
+  "panels": [
+    { "type": "row", "title": "Overview", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+
+    {
+      "type": "stat",
+      "title": "UP (target)",
+      "gridPos": {"x": 0, "y": 1, "w": 4, "h": 4},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "values": false}, "colorMode": "value"},
+      "targets": [
+        {"expr": "min(up{job=\"$job\", instance=~\"$instance\"})", "refId": "A", "datasource": "$datasource"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bool", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": 0}, {"color": "green", "value": 1}]}}}
+    },
+    {
+      "type": "stat",
+      "title": "Error rate (%)",
+      "gridPos": {"x": 4, "y": 1, "w": 4, "h": 4},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {
+          "expr": "100 * (sum(rate(whisper_requests_total{job=\"$job\", instance=~\"$instance\", status!=\"200\"}[5m])) / clamp_min(sum(rate(whisper_requests_total{job=\"$job\", instance=~\"$instance\"}[5m])), 1e-9))",
+          "refId": "A",
+          "datasource": "$datasource"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 2, "thresholds": {"mode": "percentage", "steps": [{"color": "green"}, {"color": "orange", "value": 5}, {"color": "red", "value": 10}]}}}
+    },
+    {
+      "type": "stat",
+      "title": "P95 latency (s)",
+      "gridPos": {"x": 8, "y": 1, "w": 4, "h": 4},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(whisper_request_duration_seconds_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))",
+          "refId": "A",
+          "datasource": "$datasource"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 2, "thresholds": {"mode": "absolute", "steps": [{"color": "green"}, {"color": "orange", "value": 5}, {"color": "red", "value": 10}]}}}
+    },
+    {
+      "type": "stat",
+      "title": "Requests/sec",
+      "gridPos": {"x": 12, "y": 1, "w": 4, "h": 4},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {"expr": "sum(rate(whisper_requests_total{job=\"$job\", instance=~\"$instance\"}[1m]))", "refId": "A", "datasource": "$datasource"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops", "decimals": 2}}
+    },
+
+    { "type": "row", "title": "Traffic & Latency", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 } },
+
+    {
+      "type": "timeseries",
+      "title": "RPS by status",
+      "gridPos": {"x": 0, "y": 6, "w": 8, "h": 8},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [
+        {"expr": "sum by (status) (rate(whisper_requests_total{job=\"$job\", instance=~\"$instance\"}[1m]))", "legendFormat": "{{status}}", "refId": "A", "datasource": "$datasource"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency quantiles",
+      "gridPos": {"x": 8, "y": 6, "w": 16, "h": 8},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(whisper_request_duration_seconds_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))", "legendFormat": "p50", "refId": "A", "datasource": "$datasource"},
+        {"expr": "histogram_quantile(0.90, sum by (le) (rate(whisper_request_duration_seconds_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))", "legendFormat": "p90", "refId": "B", "datasource": "$datasource"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(whisper_request_duration_seconds_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))", "legendFormat": "p95", "refId": "C", "datasource": "$datasource"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+
+    { "type": "row", "title": "Workload", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 } },
+
+    {
+      "type": "timeseries",
+      "title": "Audio processed (seconds/sec)",
+      "gridPos": {"x": 0, "y": 15, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(rate(whisper_audio_seconds_total{job=\"$job\", instance=~\"$instance\", model=~\"$model\", language=~\"$language\"}[5m]))", "legendFormat": "audio/s", "refId": "A", "datasource": "$datasource"},
+        {"expr": "sum by (model) (rate(whisper_audio_seconds_total{job=\"$job\", instance=~\"$instance\", model=~\"$model\", language=~\"$language\"}[5m]))", "legendFormat": "model={{model}}", "refId": "B", "datasource": "$datasource"}
+      ],
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue length & Concurrency",
+      "gridPos": {"x": 12, "y": 15, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum(whisper_queue_length{job=\"$job\", instance=~\"$instance\"})", "legendFormat": "queue", "refId": "A", "datasource": "$datasource"},
+        {"expr": "sum(whisper_concurrency{job=\"$job\", instance=~\"$instance\"})", "legendFormat": "concurrency", "refId": "B", "datasource": "$datasource"}
+      ]
+    },
+
+    { "type": "row", "title": "GPU (DCGM)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 } },
+
+    {
+      "type": "timeseries",
+      "title": "GPU Utilization (%)",
+      "gridPos": {"x": 0, "y": 24, "w": 8, "h": 8},
+      "targets": [
+        {"expr": "max by (gpu) (DCGM_FI_DEV_GPU_UTIL{gpu=\"$gpu\"})", "legendFormat": "gpu={{gpu}}", "refId": "A", "datasource": "$datasource"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "VRAM utilisée (MiB)",
+      "gridPos": {"x": 8, "y": 24, "w": 8, "h": 8},
+      "targets": [
+        {"expr": "avg by (gpu) (DCGM_FI_DEV_FB_USED{gpu=\"$gpu\"})", "legendFormat": "gpu={{gpu}}", "refId": "A", "datasource": "$datasource"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "mibytes"}}
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU Memory Usage (%)",
+      "gridPos": {"x": 16, "y": 24, "w": 8, "h": 8},
+      "targets": [
+        {
+          "expr": "100 * ( max by (instance,gpu) (DCGM_FI_DEV_FB_USED{gpu=\"$gpu\"}) / max by (instance,gpu) (DCGM_FI_DEV_FB_TOTAL{gpu=\"$gpu\"}) )",
+          "legendFormat": "gpu={{gpu}}",
+          "refId": "A",
+          "datasource": "$datasource"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "percent"}}
+    }
+  ]
+}
+
