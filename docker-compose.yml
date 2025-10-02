@@ -1,0 +1,176 @@
+services:
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:24.3
+    user: "101:101"
+    restart: always
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    depends_on:
+      - postgres
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: azurite-blob --blobHost 0.0.0.0
+    restart: always
+    ports:
+      - "10000:10000"
+    volumes:
+      - langfuse_azurite_data:/data
+
+  # Crée le conteneur "langfuse" dans Azurite (idempotent)
+  azurite-init:
+    image: mcr.microsoft.com/azure-cli:2.61.0
+    depends_on:
+      - azurite
+    restart: "no"
+    environment:
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+    entrypoint: ["/bin/sh","-c"]
+    command: >
+      set -e; echo "Creating container 'langfuse' in Azurite (idempotent, with retries)...";
+      i=0;
+      until az storage container create --name langfuse --connection-string "$$AZURE_STORAGE_CONNECTION_STRING" >/dev/null 2>&1; do
+        i=$$((i+1));
+        if [ $$i -ge 120 ]; then
+          echo "ERROR: Unable to create 'langfuse' container in Azurite after $$i attempts.";
+          exit 1;
+        fi;
+        echo "Azurite not ready yet... retry $$i";
+        sleep 2;
+      done;
+      echo "Azurite container 'langfuse' is ready.";
+
+  redis:
+    image: docker.io/redis:7.2.4
+    restart: always
+    command: >
+      --requirepass myredissecret
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: docker.io/postgres:${POSTGRES_VERSION:-latest}
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    command: ["postgres", "-c", "log_statement=all"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+
+  # ======= MailHog (DEV) =======
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: always
+    ports:
+      - "8025:8025"   # UI web: http://localhost:8025
+      - "1025:1025"   # SMTP: smtp://mailhog:1025
+
+  # ======= Langfuse Worker =======
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:3
+    restart: always
+    depends_on:
+      - postgres
+      - redis
+      - clickhouse
+      - azurite-init
+      - mailhog
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/postgres"
+      CLICKHOUSE_MIGRATION_URL: "clickhouse://clickhouse:9000"
+      CLICKHOUSE_URL: "http://clickhouse:8123"
+      CLICKHOUSE_USER: "clickhouse"
+      CLICKHOUSE_PASSWORD: "clickhouse"
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_AUTH: "myredissecret"
+      SALT: "CHANGE_ME_base64_ou_hex"
+      ENCRYPTION_KEY: "49218e671a82257de6cd1a19698ff74010105067df096cbcb21089873cd12662"
+      TELEMETRY_ENABLED: "true"
+      LANGFUSE_USE_AZURE_BLOB: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: "langfuse"
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: "devstoreaccount1"
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: "http://azurite:10000/devstoreaccount1"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: "events/"
+
+      # === EMAIL DEV via MailHog ===
+      SMTP_CONNECTION_URL: "smtp://mailhog:1025"
+      EMAIL_FROM_ADDRESS: "Langfuse Local <no-reply@local.test>"
+
+      # --- PROD IONOS (désactivé en dev) ---
+      # SMTP_CONNECTION_URL: "smtps://developer%40cloudiasys.com:VOTRE_MDP_URLENCODE@smtp.ionos.fr:465"
+      # EMAIL_FROM_ADDRESS: "Langfuse <developer@cloudiasys.com>"
+
+  # ======= Langfuse Web =======
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:3
+    restart: always
+    depends_on:
+      - postgres
+      - redis
+      - clickhouse
+      - azurite-init
+      - mailhog
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/postgres"
+      CLICKHOUSE_MIGRATION_URL: "clickhouse://clickhouse:9000"
+      CLICKHOUSE_URL: "http://clickhouse:8123"
+      CLICKHOUSE_USER: "clickhouse"
+      CLICKHOUSE_PASSWORD: "clickhouse"
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_AUTH: "myredissecret"
+      SALT: "CHANGE_ME_base64_ou_hex"
+      ENCRYPTION_KEY: "49218e671a82257de6cd1a19698ff74010105067df096cbcb21089873cd12662"
+      TELEMETRY_ENABLED: "true"
+
+      NEXTAUTH_URL: "http://localhost:3000"
+      NEXTAUTH_SECRET: "2zX8dpCwnBZ0b5OvVd/Stblutz1mStFK+uXnBAZ/n04="
+
+      LANGFUSE_USE_AZURE_BLOB: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: "langfuse"
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: "devstoreaccount1"
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: "http://azurite:10000/devstoreaccount1"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: "events/"
+
+      # === EMAIL DEV via MailHog ===
+      SMTP_CONNECTION_URL: "smtp://mailhog:1025"
+      EMAIL_FROM_ADDRESS: "Langfuse Local <no-reply@local.test>"
+
+      # --- PROD IONOS (désactivé en dev) ---
+      # SMTP_CONNECTION_URL: "smtps://developer%40cloudiasys.com:VOTRE_MDP_URLENCODE@smtp.ionos.fr:465"
+      # EMAIL_FROM_ADDRESS: "Langfuse <developer@cloudiasys.com>"
+
+volumes:
+  langfuse_postgres_data:
+    driver: local
+  langfuse_clickhouse_data:
+    driver: local
+  langfuse_clickhouse_logs:
+    driver: local
+  langfuse_azurite_data:
+    driver: local
+
