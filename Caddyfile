@@ -1,0 +1,27 @@
+vionaa.duckdns.org {
+	encode gzip zstd
+
+	# Autoriser le micro (utile en HTTPS)
+	header {
+		Permissions-Policy "microphone=(self)"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	# Proxy API Spring Boot
+	handle_path /api/* {
+		reverse_proxy app:8081
+	}
+
+	handle_path /ws/* {
+		reverse_proxy host.docker.internal:8086
+	}
+
+	# (si tu as du WebSocket genre /ws)
+	handle_path /ws/* {
+		reverse_proxy app:8081
+	}
+
+	# Frontend Angular servi par ton Nginx du conteneur "frontend"
+	reverse_proxy frontend:80
+}
+
