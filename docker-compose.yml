@@ -74,6 +74,11 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "admin"
       GF_USERS_DEFAULT_THEME: "dark"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: "https://vionaa.duckdns.org/grafana"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      # Optionnel mais utile si tu veux être explicite :
+      GF_SERVER_DOMAIN: "vionaa.duckdns.org"
+      GF_SERVER_ENABLE_GZIP: "true"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
