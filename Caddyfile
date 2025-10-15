@@ -13,13 +13,38 @@ vionaa.duckdns.org {
 	}
 
 	handle_path /ws/* {
-		reverse_proxy host.docker.internal:8086
+		reverse_proxy host.docker.internal:8085
 	}
+	
+	# Proxy grafana
+        route /grafana* {
+        	#uri strip_prefix /grafana
+        	reverse_proxy grafana:3000 {
+            	header_up Host {host}
+            	header_up X-Forwarded-Host {host}
+            	header_up X-Forwarded-Proto {scheme}
+            	header_up X-Forwarded-For {remote}
+        	}
+    	}
+	handle_path /prometheus/* {
+                reverse_proxy prometheus:9090
+        }
 
-	# (si tu as du WebSocket genre /ws)
-	handle_path /ws/* {
-		reverse_proxy app:8081
-	}
+	#Proxy jenkins
+	route /jenkins* {
+    		#uri strip_prefix /jenkins
+    		reverse_proxy jenkins:8080 {
+        		header_up Host {host}
+        		header_up X-Forwarded-Host {host}
+        		header_up X-Forwarded-Proto {scheme}
+        		header_up X-Forwarded-For {remote}
+        		header_up X-Forwarded-Prefix /jenkins
+    			}
+		}
+	#handle_path /prometheus/* {
+        #        reverse_proxy jenkins:8080
+       # }
+
 
 	# Frontend Angular servi par ton Nginx du conteneur "frontend"
 	reverse_proxy frontend:80
